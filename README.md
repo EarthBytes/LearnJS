@@ -1,4 +1,6 @@
-LearnJS is an interactive AI-powered chatbot designed to help you learn JavaScript. Whether you’re just starting out or want to deepen your knowledge, LearnJS can answer questions, explain definitions, and (in the future) analyse your code to help you understand errors and improve.
+# LearnJS
+LearnJS is an interactive chatbot designed to help you learn JavaScript. 
+Whether you’re just starting out or want to deepen your knowledge, LearnJS can answer questions, explain definitions, and (in the future) analyse your code to help you understand errors and improve.
 
 Features
 - Ask for Definitions – Get clear explanations of JavaScript terms and concepts (_e.g., “What is an object?”_).

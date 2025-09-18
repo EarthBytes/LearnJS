@@ -1,0 +1,18 @@
+Running Python Backend with Uvicorn:
+
+Make sure you’re in your project folder (the one with backend.py):
+    cd /path/to/your/project
+
+Activate your virtual environment:
+    source venv/bin/activate
+
+Launch the backend with Uvicorn
+    uvicorn backend:app --reload
+
+
+Running the Frontend:
+
+Option 1: Open HTML directly via live server.
+    Fetch requests to the backend may fail (CORS) if opened this way.
+
+Option 2: Run local web server

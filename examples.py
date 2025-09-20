@@ -30,16 +30,34 @@ js_examples = {
     ]
 }
 
+topic_synonyms = {
+    "functions": ["function", "methods", "def", "lambda"],
+    "variables": ["var", "let", "const", "variable"],
+    "arrays": ["list", "collection"],
+    "objects": ["dictionary", "hash", "map"],
+}
+
 def get_example(topic, example_index=0):
-    # Get an example for a specific topic
+    print(f"Getting example for topic: {topic}")  # Debug print
+    print(f"Available topics in js_examples: {list(js_examples.keys())}")  # Debug print
+    
+    topic = topic.lower()
+    # Try direct match first
     if topic in js_examples:
-        examples = js_examples[topic]
-        if 0 <= example_index < len(examples):
-            return examples[example_index]
-        else:
-            return examples[0]  # Return first example if index is out of range
+        return _get_example_helper(topic, example_index)
+    
+    # Try matching with synonyms from topic_synonyms
+    for main_topic, synonyms in topic_synonyms.items():
+        if topic in synonyms:
+            return _get_example_helper(main_topic, example_index)
+    
     return f"I don't have specific examples for {topic} yet. Try asking about the basics first!"
 
-
+def _get_example_helper(topic, example_index):
+    examples = js_examples[topic]
+    if 0 <= example_index < len(examples):
+        return examples[example_index]
+    else:
+        return examples[0]  # Return first example if index is out of range
 def get_all_examples_for_topic(topic):
     return js_examples.get(topic, [])

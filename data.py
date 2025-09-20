@@ -144,7 +144,7 @@ js_facts = {
 
 conversation_prompts = {
     # Help requests (high priority when standalone, but lower when mixed with learning)
-    "help": {"response": "You can just ask me about JS stuff. Like:\n• 'What is a function?'\n• 'Show me arrays'\n• 'How do I use loops?'\n• 'Explain variables'\n\nGo ahead, ask me anything JS!", "priority": 3 },
+    "help": {"response": "You can just ask me about JS stuff. Like:\n - 'What is a function?'\n - 'Show me arrays'\n - 'How do I use loops?'\n - 'Explain variables'\n\nGo ahead, ask me anything about JS!", "priority": 3 },
     "how do i use this": { "response": "Just ask about JavaScript! I can explain concepts or show examples. Try something like 'What are variables?' or 'How do functions work?'", "priority": 3 },
     "how do i use you": { "response": "Ask me about JavaScript stuff and I'll try to explain it. Variables, functions, arrays, loops—you name it.", "priority": 3 },
     "how do i use learnjs": { "response": "Just type any JS question and I'll help out. Something like 'What is an array?' works fine.", "priority": 3 },
@@ -248,9 +248,9 @@ user_status_responses = {
 # Topic synonyms for keyword matching
 
 topic_synonyms = {
-    "function": ["function", "functions", "method", "methods", "func", "functon", "fucntion", "funtion"],
-    "variable": ["variable", "variables", "var", "let", "const", "declaration", "variabel", "varaible"],
-    "array": ["array", "arrays", "list", "lists", "aray", "arays", "ary"],
+    "function": ["function", "functions", "method", "methods", "func", "functon", "fucntion", "funtion", "functin"],
+    "variable": ["variable", "variables", "var", "let", "const", "declaration", "variabel", "varaible", "varibles"],
+    "array": ["array", "arrays", "list", "lists", "aray", "arays", "ary", "array methods"],
     "object": ["object", "objects", "obj", "dictionary", "objct"],
     "loop": ["loop", "loops", "iteration", "iterate", "for", "while", "for loop", "while loop", "looping"],
     "conditional": ["if", "else", "switch", "condition", "conditional", "if statement", "conditionals"],
@@ -274,7 +274,7 @@ topic_synonyms = {
     "hoisting": ["hoisting", "hoist"],
     "basics": ["basics", "basic", "introduction", "getting started", "syntax", "beginner"],
     "operators": ["operator", "operators", "arithmetic", "comparison", "logical", "assignment"],
-    "troubleshooting": ["error", "issue", "problem", "debug", "not working", "fix", "broken", "wrong"],
+    "troubleshooting": ["troubleshooting", "troubleshoot", "not working", "broken", "fix", "debug", "issue", "problem"],
     "data types": ["data type", "data types", "type", "types", "datatypes"],
 }
 

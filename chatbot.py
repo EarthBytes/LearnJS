@@ -150,12 +150,13 @@ class EnhancedChatbot:
         # check for follow-up yes/no
         last_bot = self.memory.get_last_bot_turn()
         last_topic = self.memory.get_last_topic()
-        if last_bot and last_topic and "Want me to explain more?" in last_bot["text"]:
+        
+        if last_bot and last_topic and ("Would you like to see an example?" in last_bot["text"] or "Want me to explain more?" in last_bot["text"]):
             if user_input in ["yes", "y"]:
-                # Get more detailed info or examples
-                response = self._get_detailed_topic_info(last_topic)
-                self.memory.store_turn("bot", response)
-                return response
+                # Get detailed example from examples system
+                detailed_response = self._get_detailed_topic_info(last_topic)
+                self.memory.store_turn("bot", detailed_response)
+                return detailed_response
             elif user_input in ["no", "n"]:
                 response = "No problem! You can ask about another topic."
                 self.memory.store_turn("bot", response)
@@ -174,12 +175,7 @@ class EnhancedChatbot:
 
         # Fall back to basic info with additional context
         basic_info = self._get_topic_info(topic)
-        return (
-            f"{basic_info}\n\nHere's what you can try:\n"
-            "• Ask for specific examples\n"
-            "• Request step-by-step explanations\n"
-            "• Ask about common use cases"
-        )
+        return f"{basic_info}\n\nHere's what you can try:\n• Ask for specific examples\n• Request step-by-step explanations\n• Ask about common use cases"
 
     def _find_enhanced_conversational_prompts(self, user_input: str) -> List[ConversationalMatch]:
         matches = []
@@ -369,9 +365,9 @@ class EnhancedChatbot:
         
         # Keyword matches boost confidence
         if keywords:
-            keyword_score = 0.4 * min(len(keywords) / 2, 1.0)
-            # Factor in match quality 
-            keyword_score *= base_match_confidence
+            keyword_score = 0.5 * min(len(keywords) / 2, 1.0)
+            # Factor in match quality (for fuzzy matches)
+            keyword_score *= max(base_match_confidence, 0.7)
             base_score += keyword_score
         
         # Clear question type boosts confidence
@@ -381,7 +377,7 @@ class EnhancedChatbot:
         # Longer, complete questions boost confidence
         word_count = len(user_input.split())
         if word_count >= 3:
-            base_score += 0.1
+            base_score += 0.15
         if word_count >= 6:
             base_score += 0.1
         
@@ -396,52 +392,23 @@ class EnhancedChatbot:
         has_conversation = len(conversational_matches) > 0
         has_learning = learning_intent.confidence >= 0.4 and learning_intent.topic
         
-        # Special case: if user asks for help alongside learning questions, prioritise learning over help
-        if has_conversation and has_learning:
-            help_keywords = ['help', 'how do i use', 'what can you do']
-            is_help_request = any(keyword in original_input.lower() for keyword in help_keywords)
-            
-            if is_help_request and conversational_matches[0].priority <= 2:
-                # If it's a help request but there's a learning intent, prioritise learning
-                if learning_intent.topic and learning_intent.topic.startswith("multiple:"):
-                    return self._handle_multiple_topics(learning_intent)
-                else:
-                    return self.generate_enhanced_response(learning_intent)
-        
-        # Standard multiple intent handling
-        if has_conversation and has_learning:
-            # Get the highest priority conversational response
-            conv_response = conversational_matches[0].response
-            
-            # Handle multiple topics in learning
+        # Always prioritize learning over help requests
+        if has_learning:
+            # If there's any learning intent, handle it first and ignore help requests
             if learning_intent.topic and learning_intent.topic.startswith("multiple:"):
-                learning_response = self._handle_multiple_topics(learning_intent)
+                return self._handle_multiple_topics(learning_intent)
             else:
-                learning_response = self.generate_enhanced_response(learning_intent)
-            
-            # High priority conversational prompts (like greetings) get precedence
-            if conversational_matches[0].priority >= 3:
-                return f"{conv_response}\n\n{learning_response}"
-            elif conversational_matches[0].priority == 1:  # Low priority (like greetings)
-                # For greetings with learning, just give a brief greeting then focus on learning
-                brief_greeting = conv_response.split('!')[0] + "!"  # Take first part before exclamation
-                return f"{brief_greeting} {learning_response}"
-            else:
-                return f"{conv_response} {learning_response}"
+                response = self.generate_enhanced_response(learning_intent)
+                # Only add conversational elements if they're greetings (priority 1)
+                if has_conversation and conversational_matches[0].priority == 1:
+                    brief_greeting = conversational_matches[0].response.split('!')[0] + "!"
+                    return f"{brief_greeting} {response}"
+                return response
         
-        # Case 2 - Only conversational
-        elif has_conversation and not has_learning:
+        # Only handle pure conversational intents if no learning detected
+        elif has_conversation:
             return conversational_matches[0].response
         
-        # Case 3 - Only learning (multiple topics)
-        elif has_learning and learning_intent.topic and learning_intent.topic.startswith("multiple:"):
-            return self._handle_multiple_topics(learning_intent)
-        
-        # Case 4 - Only learning (single topic)
-        elif has_learning:
-            return self.generate_enhanced_response(learning_intent)
-        
-        # Case 5 - Fallback to original logic
         else:
             return self._handle_enhanced_fallback(original_input)
 
@@ -457,25 +424,39 @@ class EnhancedChatbot:
             info2 = self._get_topic_info(topic2)
             
             if intent.question_type == QuestionType.COMPARISON:
-                return f"{topic1.title()} vs {topic2.title()}:\n\n{topic1.title()}:{info1}\n\n{topic2.title()}: {info2}\n\nWhich one would you like me to explain further?"
+                return f"**{topic1.title()}:** {info1}\n\n**{topic2.title()}:** {info2}\n\nWhat specific aspects would you like me to compare?"
             else:
-                return f"I can see you're asking about {topic1} and {topic2}!\n\n {info1}\n\n {info2}\n\nWhich topic interests you more?"
+                return f"**{topic1.title()}:** {info1}\n\n**{topic2.title()}:** {info2}\n\nWould you like me to go deeper into either topic?"
         
         elif len(topics) > 2:
-            # Handle many topics
             topic_list = ", ".join([t.title() for t in topics[:-1]]) + f", and {topics[-1].title()}"
             return f"You're asking about {topic_list}! That's quite a bit to cover.\n\nWhich topic would you like me to start with?"
         
         else:
-            # Shouldn't happen, but fallback
             return self._get_topic_info(topics[0])
 
-    def _handle_fallback_logic(self, original_input: str) -> str:
-        # Lowercase for matching but keep original for responses
+    def _handle_enhanced_fallback(self, original_input: str) -> str:
+        # Fallback handling
         user_input = original_input.lower()
         
-        # Check for partial keyword matches
-        matches = [(keyword, fact) for keyword, fact in self.js_facts.items() if keyword.lower() in user_input]
+        # Check for partial keyword matches with fuzzy matching
+        matches = []
+        for keyword, fact in self.js_facts.items():
+            if keyword.lower() in user_input:
+                matches.append((keyword, fact))
+        
+        # If no direct matches, try fuzzy matching
+        if not matches:
+            words_in_input = user_input.split()
+            for word in words_in_input:
+                if len(word) >= 4:  # Only try fuzzy matching for longer words
+                    for keyword in self.js_facts.keys():
+                        if len(keyword) >= 4:
+                            similarity = difflib.SequenceMatcher(None, word, keyword.lower()).ratio()
+                            if similarity >= 0.75:  # Low threshold for matching
+                                matches.append((keyword, self.js_facts[keyword]))
+                                break
+        
         if matches:
             keyword, fact = matches[0]
             question_type = self._determine_enhanced_question_type(original_input)
@@ -579,7 +560,7 @@ class EnhancedChatbot:
     def _handle_no_matches(self, user_input: str) -> str:
         # Handle no matches found
         # Try to suggest topics based on partial matches
-        suggestions = self._get_topic_suggestions(user_input)
+        suggestions = self._get_enhanced_topic_suggestions(user_input)
         
         if suggestions:
             suggestions_text = ", ".join(suggestions)

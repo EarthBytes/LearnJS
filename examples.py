@@ -42,5 +42,4 @@ def get_example(topic, example_index=0):
 
 
 def get_all_examples_for_topic(topic):
-    """Get all examples for a specific topic"""
     return js_examples.get(topic, [])

@@ -26,6 +26,7 @@ h1 {
     overflow-y: scroll;
     font-size: 14px;
     line-height: 1.4;
+    scroll-behavior: smooth;
 }
 
 #inputArea {
@@ -47,8 +48,8 @@ input {
 }
 
 input:focus {
-    outline: 2px solid #2fa729;
-    background: #4e4e4e;
+    outline: none;
+    background: #555;
 }
 
 button {
@@ -82,7 +83,7 @@ button:active {
     color: #ffcc80; 
     margin: 8px 0;
     padding: 4px 0;
-    line-height: 1.5;
+    line-height: 1.6;
 }
 
 .bot p {
@@ -102,10 +103,25 @@ button:active {
 }
 
 /* Bullet point styling */
+ul {
+    margin: 8px 0;
+    padding-left: 0;
+    list-style: none;
+}
+
 .bullet-point {
     display: block;
-    margin: 4px 0 4px 16px;
-    text-indent: -16px;
+    margin: 4px 0;
+    padding-left: 16px;
+    position: relative;
+}
+
+.bullet-point:before {
+    content: "• ";
+    position: absolute;
+    left: 0;
+    color: #2fa729;
+    font-weight: bold;
 }
 
 /* Code styling */
@@ -116,6 +132,20 @@ code {
     border-radius: 3px;
     font-family: 'Courier New', monospace;
     font-size: 13px;
+}
+
+pre {
+    background: #1a1a1a;
+    color: #a8e6cf;
+    padding: 12px;
+    border-radius: 6px;
+    overflow-x: auto;
+    margin: 8px 0;
+}
+
+pre code {
+    background: none;
+    padding: 0;
 }
 
 /* Bold text styling */

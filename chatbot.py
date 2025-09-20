@@ -1,11 +1,15 @@
 from data import ( js_facts, conversation_prompts, user_status_responses, topic_synonyms, question_patterns )
 from memory import Memory
 import re
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Set
 from dataclasses import dataclass
 from enum import Enum
+from collections import defaultdict
+import difflib
+from examples import get_example, get_all_examples_for_topic
 
 CONFUSED_INPUTS = {"huh?", "what?", "?", "idk", "i don't understand", "explain", "can you repeat?", "confused"}
+NONSENSE_THRESHOLD = 0.3  # Minimum ratio of meaningful words to total words
 
 class QuestionType(Enum):
     DEFINITION = "definition"
@@ -22,39 +26,134 @@ class Intent:
     confidence: float
     keywords_found: List[str]
 
-class Chatbot:
+@dataclass
+class ConversationalMatch:
+    prompt: str
+    response: str
+    priority: int
+    position: int
+    length: int  # Length of the matched phrase
+
+class EnhancedChatbot:
     def __init__(self):
         self.memory = Memory(max_turns=5)
         
         # Import all data from data.py
         self.js_facts = js_facts
         self.conversation_prompts = conversation_prompts
+        self.user_status_responses = user_status_responses
         self.topic_synonyms = topic_synonyms
         self.question_patterns = question_patterns
+        
+        # Create normalized conversation prompts for better matching
+        self._create_normalized_prompts()
+        
+    def _create_normalized_prompts(self):
+        self.normalized_prompts = {}
+        for prompt, data in self.conversation_prompts.items():
+            # Remove punctuation and normalise
+            normalized = self._normalize_text(prompt)
+            self.normalized_prompts[normalized] = {
+                'original': prompt,
+                'data': data
+            }
+
+    def _normalize_text(self, text: str) -> str:
+        # Remove common punctuation but keep letters, numbers and spaces
+        normalized = re.sub(r"[^\w\s]", "", text.lower())
+        # Replace multiple spaces with single space
+        normalized = re.sub(r"\s+", " ", normalized).strip()
+        return normalized
+
+    def _is_nonsense_input(self, user_input: str) -> bool:
+        # Determine if input is mostly nonsense
+        words = user_input.lower().split()
+        if len(words) == 0:
+            return True
+            
+        meaningful_words = 0
+        
+        # Check against known keywords and conversation prompts
+        for word in words:
+            # Check if word is in any topic synonym
+            for topic, synonyms in self.topic_synonyms.items():
+                if any(word in synonym.lower() for synonym in synonyms):
+                    meaningful_words += 1
+                    break
+            else:
+                # Check if word is in conversation prompts
+                if any(word in prompt.lower() for prompt in self.conversation_prompts.keys()):
+                    meaningful_words += 1
+                # Check common English words (basic list)
+                elif word in {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'can', 'what', 'how', 'when', 'where', 'why', 'who', 'which', 'this', 'that', 'these', 'those', 'i', 'you', 'he', 'she', 'it', 'we', 'they', 'me', 'him', 'her', 'us', 'them'}:
+                    meaningful_words += 1
+        
+        ratio = meaningful_words / len(words)
+        return ratio < NONSENSE_THRESHOLD
 
     def get_response(self, user_input: str) -> str:
         original_input = user_input
-        user_input = user_input.lower()
-        self.memory.store_turn("user", user_input)
+        user_input_lower = user_input.lower()
+        self.memory.store_turn("user", user_input_lower)
+
+        # Check for nonsense input
+        if self._is_nonsense_input(user_input):
+            response = "I'm not quite sure what you're asking about. Can you ask me something about JavaScript?\n\nI can help with: variables, functions, arrays, objects, loops, conditionals, DOM, events, and more!"
+            self.memory.store_turn("bot", response)
+            return response
 
         # Check for user status replies after bot asked "How are you?"
+        if self._handle_status_response(user_input_lower):
+            return self._handle_status_response(user_input_lower)
 
-        if self.memory.get_last_bot_turn():
-            last_bot_text = self.memory.get_last_bot_turn()["text"].lower()
+        # Handle follow-up yes/no responses
+        follow_up_response = self._handle_follow_up_response(user_input_lower)
+        if follow_up_response:
+            return follow_up_response
+
+        # Find all conversational matches 
+        conversational_matches = self._find_enhanced_conversational_prompts(user_input_lower)
+        
+        # Extract learning intent
+        learning_intent = self.extract_enhanced_intent(original_input)
+        
+        # Handle multiple intents with improved prioritisation
+        response = self._handle_enhanced_multiple_intents(conversational_matches, learning_intent, original_input)
+        
+        # Store response with appropriate topic
+        if learning_intent.topic and learning_intent.confidence >= 0.4:
+            # Store just the topic name, not complex multi-topic strings
+            topic_to_store = learning_intent.topic.split(':')[0] if ':' in learning_intent.topic else learning_intent.topic
+            self.memory.store_turn("bot", response, topic=topic_to_store)
+        else:
+            self.memory.store_turn("bot", response)
+
+        return response
+
+    def _handle_status_response(self, user_input: str) -> Optional[str]:
+        # Handle responses to 'how are you' questions
+        last_bot = self.memory.get_last_bot_turn()
+        if not last_bot:
+            return None
             
-            if any(phrase in last_bot_text for phrase in ["how are you", "how's it going", "how are you doing"]):
-                for status, data in self.user_status_responses.items():
-                    if status in user_input:
-                        response = data["response"]
-                        self.memory.store_turn("bot", response)
-                        return response
-                    
+        last_bot_text = last_bot["text"].lower()
+        
+        if any(phrase in last_bot_text for phrase in ["how are you", "how's it going", "how are you doing"]):
+            for status, data in self.user_status_responses.items():
+                if status in user_input:
+                    response = data["response"]
+                    self.memory.store_turn("bot", response)
+                    return response
+        return None
+
+    def _handle_follow_up_response(self, user_input: str) -> Optional[str]:
         # check for follow-up yes/no
         last_bot = self.memory.get_last_bot_turn()
         last_topic = self.memory.get_last_topic()
         if last_bot and last_topic and "Want me to explain more?" in last_bot["text"]:
             if user_input in ["yes", "y"]:
-                response = self.js_facts.get(last_topic, f"Sorry, I have no info on {last_topic}.")
+                # Get more detailed info or examples
+                response = self._get_detailed_topic_info(last_topic)
                 self.memory.store_turn("bot", response)
                 return response
             elif user_input in ["no", "n"]:
@@ -65,71 +164,145 @@ class Chatbot:
                 response = "I didn't quite get that. Please reply 'yes' or 'no'."
                 self.memory.store_turn("bot", response)
                 return response
+        return None
 
-        # Check for multiple intents (conversational + learning)
-        conversational_matches = self._find_conversational_prompts(user_input)
-        learning_intent = self.extract_intent(original_input)
+    def _get_detailed_topic_info(self, topic: str) -> str:
+        # Get more detailed information about a topic
+        example = get_example(topic)
+        if "I don't have specific examples" not in example:
+            return example
+
+        # Fall back to basic info with additional context
+        basic_info = self._get_topic_info(topic)
+        return (
+            f"{basic_info}\n\nHere's what you can try:\n"
+            "• Ask for specific examples\n"
+            "• Request step-by-step explanations\n"
+            "• Ask about common use cases"
+        )
+
+    def _find_enhanced_conversational_prompts(self, user_input: str) -> List[ConversationalMatch]:
+        matches = []
+        normalized_input = self._normalize_text(user_input)
         
-        # Handle multiple intents with priority
-        response = self._handle_multiple_intents(conversational_matches, learning_intent, original_input)
+        # Direct matching with original algorithm
+        for prompt, data in self.conversation_prompts.items():
+            if prompt in user_input:
+                position = user_input.find(prompt)
+                matches.append(ConversationalMatch(
+                    prompt=prompt,
+                    response=data['response'],
+                    priority=data['priority'],
+                    position=position,
+                    length=len(prompt)
+                ))
         
-        # Store response with appropriate topic
-        if learning_intent.topic and learning_intent.confidence >= 0.4:
-            self.memory.store_turn("bot", response, topic=learning_intent.topic)
-        else:
-            self.memory.store_turn("bot", response)
+        # Matching with normalised text
+        for normalized_prompt, prompt_data in self.normalized_prompts.items():
+            if normalized_prompt in normalized_input:
+                original_prompt = prompt_data['original']
+                # Avoid duplicates
+                if not any(m.prompt == original_prompt for m in matches):
+                    position = normalized_input.find(normalized_prompt)
+                    matches.append(ConversationalMatch(
+                        prompt=original_prompt,
+                        response=prompt_data['data']['response'],
+                        priority=prompt_data['data']['priority'],
+                        position=position,
+                        length=len(normalized_prompt)
+                    ))
+        
+        # Sort by priority (higher first), then by length (longer first), then by position (earlier first)
+        return sorted(matches, key=lambda x: (-x.priority, -x.length, x.position))
 
-        return response
-
-    def extract_intent(self, user_input: str) -> Intent:
-        # Extract topic and question type from user input
+    def extract_enhanced_intent(self, user_input: str) -> Intent:
         user_input_lower = user_input.lower()
         
-        # Find matching topics and their positions
+        # Find all topic matches with positions and confidence scores
         topic_matches = []
         
         # Check synonyms first
         for topic, synonyms in self.topic_synonyms.items():
             for synonym in synonyms:
+                # Exact match
                 if synonym in user_input_lower:
                     position = user_input_lower.find(synonym)
                     topic_matches.append({
                         'topic': topic,
                         'keyword': synonym,
                         'position': position,
-                        'length': len(synonym)
+                        'length': len(synonym),
+                        'confidence': 1.0,
+                        'match_type': 'exact'
                     })
+                else:
+                    # Fuzzy match for typos (only for longer words)
+                    if len(synonym) >= 4:
+                        words_in_input = user_input_lower.split()
+                        for word in words_in_input:
+                            if len(word) >= 4:
+                                similarity = difflib.SequenceMatcher(None, synonym, word).ratio()
+                                if similarity >= 0.8:
+                                    position = user_input_lower.find(word)
+                                    topic_matches.append({
+                                        'topic': topic,
+                                        'keyword': word,
+                                        'position': position,
+                                        'length': len(word),
+                                        'confidence': similarity,
+                                        'match_type': 'fuzzy'
+                                    })
         
         # Also check your original js_facts keys
         for keyword in self.js_facts.keys():
             if keyword.lower() in user_input_lower:
                 position = user_input_lower.find(keyword.lower())
                 mapped_topic = self._map_keyword_to_topic(keyword)
-                topic_matches.append({
-                    'topic': mapped_topic or keyword,
-                    'keyword': keyword,
-                    'position': position,
-                    'length': len(keyword)
-                })
+                # Avoid duplicates
+                if not any(match['topic'] == (mapped_topic or keyword) and match['match_type'] == 'exact' for match in topic_matches):
+                    topic_matches.append({
+                        'topic': mapped_topic or keyword,
+                        'keyword': keyword,
+                        'position': position,
+                        'length': len(keyword),
+                        'confidence': 1.0,
+                        'match_type': 'exact'
+                    })
         
-        # Remove duplicates and sort by position
+        # Remove duplicates and sort by confidence, then position
         seen_topics = set()
         unique_matches = []
-        for match in sorted(topic_matches, key=lambda x: x['position']):
-            if match['topic'] not in seen_topics:
+        for match in sorted(topic_matches, key=lambda x: (-x['confidence'], x['position'])):
+            topic_key = f"{match['topic']}_{match['position']}"
+            if topic_key not in seen_topics:
                 unique_matches.append(match)
-                seen_topics.add(match['topic'])
+                seen_topics.add(topic_key)
+        
+        # Group by topic to avoid multiple mentions of same topic
+        topic_groups = defaultdict(list)
+        for match in unique_matches:
+            topic_groups[match['topic']].append(match)
+        
+        # Take best match per topic
+        final_matches = []
+        for topic, matches in topic_groups.items():
+            best_match = max(matches, key=lambda x: x['confidence'])
+            final_matches.append(best_match)
+        
+        # Sort by position for final ordering
+        final_matches.sort(key=lambda x: x['position'])
         
         # Determine question type
-        question_type = self._determine_question_type(user_input)
+        question_type = self._determine_enhanced_question_type(user_input)
         
-        # If multiple topics, create combined response intent
-        if len(unique_matches) > 1:
-            # Create a multi-topic intent
-            topics = [match['topic'] for match in unique_matches]
-            keywords = [match['keyword'] for match in unique_matches]
-            primary_topic = f"multiple:{','.join(topics)}"  # Special indicator for multiple topics
-            confidence = 0.8  # High confidence since we found multiple clear topics
+        # Create intent based on matches
+        if len(final_matches) > 1:
+            # Multiple topics
+            topics = [match['topic'] for match in final_matches]
+            keywords = [match['keyword'] for match in final_matches]
+            primary_topic = f"multiple:{','.join(topics)}"
+            # Calculate confidence based on matches
+            confidence = min(0.9, sum(match['confidence'] for match in final_matches) / len(final_matches))
             
             return Intent(
                 topic=primary_topic,
@@ -137,11 +310,10 @@ class Chatbot:
                 confidence=confidence,
                 keywords_found=keywords
             )
-        
-        # Single topic handling (existing logic)
-        elif len(unique_matches) == 1:
-            match = unique_matches[0]
-            confidence = self._calculate_confidence([match['keyword']], question_type, user_input)
+        elif len(final_matches) == 1:
+            # Single topic
+            match = final_matches[0]
+            confidence = self._calculate_enhanced_confidence([match['keyword']], question_type, user_input, match['confidence'])
             
             return Intent(
                 topic=match['topic'],
@@ -149,10 +321,9 @@ class Chatbot:
                 confidence=confidence,
                 keywords_found=[match['keyword']]
             )
-        
-        # No topics found
         else:
-            confidence = self._calculate_confidence([], question_type, user_input)
+            # No topics found
+            confidence = self._calculate_enhanced_confidence([], question_type, user_input, 0.0)
             return Intent(
                 topic=None,
                 question_type=question_type,
@@ -160,34 +331,87 @@ class Chatbot:
                 keywords_found=[]
             )
 
-    def _find_conversational_prompts(self, user_input: str) -> List[Dict]:
-        # Find conversational prompts in user input
-        matches = []
+    def _determine_enhanced_question_type(self, user_input: str) -> QuestionType:
+        # Question type determines pattern matching
         user_input_lower = user_input.lower()
         
-        for prompt, data in self.conversation_prompts.items():
-            if prompt in user_input_lower:
-                position = user_input_lower.find(prompt)
-                matches.append({
-                    'prompt': prompt,
-                    'response': data['response'],
-                    'priority': data['priority'],
-                    'position': position
-                })
+        # Score each question type
+        type_scores = defaultdict(int)
         
-        # Sort by priority (higher first), then by position (earlier first)
-        return sorted(matches, key=lambda x: (-x['priority'], x['position']))
+        for q_type_str, patterns in self.question_patterns.items():
+            for pattern in patterns:
+                matches = len(re.findall(pattern, user_input_lower))
+                if matches > 0:
+                    type_scores[q_type_str] += matches
+        
+        # Special handling for troubleshooting
+        troubleshooting_keywords = ['error', 'issue', 'problem', 'not working', 'fix', 'debug', 'broken', 'wrong']
+        for keyword in troubleshooting_keywords:
+            if keyword in user_input_lower:
+                type_scores['troubleshooting'] += 2  # Higher weight for troubleshooting
+        
+        # Return the highest scoring type
+        if type_scores:
+            best_type = max(type_scores.items(), key=lambda x: x[1])[0]
+            type_mapping = {
+                "definition": QuestionType.DEFINITION,
+                "example": QuestionType.EXAMPLE,
+                "how_to": QuestionType.HOW_TO,
+                "comparison": QuestionType.COMPARISON,
+                "troubleshooting": QuestionType.TROUBLESHOOTING
+            }
+            return type_mapping.get(best_type, QuestionType.GENERAL)
+        
+        return QuestionType.GENERAL
 
-    def _handle_multiple_intents(self, conversational_matches: List[Dict], learning_intent: Intent, original_input: str) -> str:
-        # Determine if we have both conversational and learning intents
+    def _calculate_enhanced_confidence(self, keywords: List[str], question_type: QuestionType, user_input: str, base_match_confidence: float) -> float:
+        base_score = 0.1
+        
+        # Keyword matches boost confidence
+        if keywords:
+            keyword_score = 0.4 * min(len(keywords) / 2, 1.0)
+            # Factor in match quality 
+            keyword_score *= base_match_confidence
+            base_score += keyword_score
+        
+        # Clear question type boosts confidence
+        if question_type != QuestionType.GENERAL:
+            base_score += 0.2
+        
+        # Longer, complete questions boost confidence
+        word_count = len(user_input.split())
+        if word_count >= 3:
+            base_score += 0.1
+        if word_count >= 6:
+            base_score += 0.1
+        
+        # Question marks indicate questions
+        if "?" in user_input:
+            base_score += 0.1
+        
+        return min(base_score, 1.0)
+
+    def _handle_enhanced_multiple_intents(self, conversational_matches: List[ConversationalMatch], learning_intent: Intent, original_input: str) -> str:
         
         has_conversation = len(conversational_matches) > 0
         has_learning = learning_intent.confidence >= 0.4 and learning_intent.topic
         
-        # Case 1 - Both conversational and learning 
+        # Special case: if user asks for help alongside learning questions, prioritise learning over help
+        if has_conversation and has_learning:
+            help_keywords = ['help', 'how do i use', 'what can you do']
+            is_help_request = any(keyword in original_input.lower() for keyword in help_keywords)
+            
+            if is_help_request and conversational_matches[0].priority <= 2:
+                # If it's a help request but there's a learning intent, prioritise learning
+                if learning_intent.topic and learning_intent.topic.startswith("multiple:"):
+                    return self._handle_multiple_topics(learning_intent)
+                else:
+                    return self.generate_enhanced_response(learning_intent)
+        
+        # Standard multiple intent handling
         if has_conversation and has_learning:
             # Get the highest priority conversational response
-            conv_response = conversational_matches[0]['response']
+            conv_response = conversational_matches[0].response
             
             # Handle multiple topics in learning
             if learning_intent.topic and learning_intent.topic.startswith("multiple:"):
@@ -195,15 +419,19 @@ class Chatbot:
             else:
                 learning_response = self.generate_enhanced_response(learning_intent)
             
-            # Combine responses based on priority
-            if conversational_matches[0]['priority'] >= 3:  # High priority conversation
+            # High priority conversational prompts (like greetings) get precedence
+            if conversational_matches[0].priority >= 3:
                 return f"{conv_response}\n\n{learning_response}"
-            else:  # Low/medium priority
+            elif conversational_matches[0].priority == 1:  # Low priority (like greetings)
+                # For greetings with learning, just give a brief greeting then focus on learning
+                brief_greeting = conv_response.split('!')[0] + "!"  # Take first part before exclamation
+                return f"{brief_greeting} {learning_response}"
+            else:
                 return f"{conv_response} {learning_response}"
         
         # Case 2 - Only conversational
         elif has_conversation and not has_learning:
-            return conversational_matches[0]['response']
+            return conversational_matches[0].response
         
         # Case 3 - Only learning (multiple topics)
         elif has_learning and learning_intent.topic and learning_intent.topic.startswith("multiple:"):
@@ -215,7 +443,7 @@ class Chatbot:
         
         # Case 5 - Fallback to original logic
         else:
-            return self._handle_fallback_logic(original_input)
+            return self._handle_enhanced_fallback(original_input)
 
     def _handle_multiple_topics(self, intent: Intent) -> str:
         # Handle multiple topics in a single intent
@@ -236,7 +464,7 @@ class Chatbot:
         elif len(topics) > 2:
             # Handle many topics
             topic_list = ", ".join([t.title() for t in topics[:-1]]) + f", and {topics[-1].title()}"
-            return f"Wow, you're asking about {topic_list}! That's a lot to cover.\n\nWhich one would you like me to start with? Or would you prefer a brief overview of all of them?"
+            return f"You're asking about {topic_list}! That's quite a bit to cover.\n\nWhich topic would you like me to start with?"
         
         else:
             # Shouldn't happen, but fallback
@@ -246,11 +474,11 @@ class Chatbot:
         # Lowercase for matching but keep original for responses
         user_input = original_input.lower()
         
-        # Check original keyword matching as fallback
+        # Check for partial keyword matches
         matches = [(keyword, fact) for keyword, fact in self.js_facts.items() if keyword.lower() in user_input]
         if matches:
             keyword, fact = matches[0]
-            question_type = self._determine_question_type(original_input)
+            question_type = self._determine_enhanced_question_type(original_input)
             return self._customize_response_by_type(fact, keyword, question_type)
 
         # Memory-based fallback
@@ -262,14 +490,18 @@ class Chatbot:
             text = turn["text"].lower()
             if text not in CONFUSED_INPUTS and text not in ["yes", "no", "y", "n"]:
                 last_meaningful = turn["text"]
-                for keyword in self.js_facts.keys():
-                    if keyword.lower() in text:
-                        last_matched_keyword = keyword
+                # Look for any topic in the last meaningful turn
+                for topic, synonyms in self.topic_synonyms.items():
+                    for synonym in synonyms:
+                        if synonym in text:
+                            last_matched_keyword = topic
+                            break
+                    if last_matched_keyword:
                         break
                 break
 
         if last_meaningful and last_matched_keyword:
-            return f"I'm not sure about that. Earlier you asked me about '{last_meaningful}'. Want me to explain more?"
+            return f"I'm not sure about that. Earlier you were asking about {last_matched_keyword}. Want me to explain more about that topic?"
         else:
             return self._handle_no_matches(original_input)
 
@@ -283,7 +515,8 @@ class Chatbot:
             "for loop": "loop", "while loop": "loop", "for": "loop", "while": "loop",
             "if statement": "conditional", "if": "conditional", "else": "conditional",
             "arrays": "array", "objects": "object", "functions": "function",
-            "strings": "string", "numbers": "number", "booleans": "boolean"
+            "strings": "string", "numbers": "number", "booleans": "boolean",
+            "what is javascript": "javascript", "javascript basics": "basics"
         }
         
         # Check direct mapping
@@ -295,77 +528,33 @@ class Chatbot:
             if topic in keyword_lower or keyword_lower in topic:
                 return topic
         
-        return keyword_lower  # Return the keyword itself as topic
-
-    def _determine_question_type(self, user_input: str) -> QuestionType:
-        # determine what type of question is being asked
-        user_input_lower = user_input.lower()
-        
-        for q_type_str, patterns in self.question_patterns.items():
-            for pattern in patterns:
-                if re.search(pattern, user_input_lower):
-                    # Map string to enum
-                    if q_type_str == "definition":
-                        return QuestionType.DEFINITION
-                    elif q_type_str == "example":
-                        return QuestionType.EXAMPLE
-                    elif q_type_str == "how_to":
-                        return QuestionType.HOW_TO
-                    elif q_type_str == "comparison":
-                        return QuestionType.COMPARISON
-                    elif q_type_str == "troubleshooting":
-                        return QuestionType.TROUBLESHOOTING
-        
-        return QuestionType.GENERAL
-
-    def _calculate_confidence(self, keywords: List[str], question_type: QuestionType, user_input: str) -> float:
-        # Calculate confidence on intent
-        base_score = 0.2
-        
-        # Keyword matches boost confidence
-        if keywords:
-            base_score += 0.4 * min(len(keywords) / 2, 1.0)
-        
-        # Clear question type boosts confidence
-        if question_type != QuestionType.GENERAL:
-            base_score += 0.2
-        
-        # Longer, complete questions boost confidence
-        if len(user_input.split()) >= 3:
-            base_score += 0.1
-        
-        # Question marks indicate questions
-        if "?" in user_input:
-            base_score += 0.1
-        
-        return min(base_score, 1.0)
+        return keyword_lower
 
     def generate_enhanced_response(self, intent: Intent) -> str:
         # Generate response using intent understanding
         topic_info = self._get_topic_info(intent.topic)
         return self._customize_response_by_type(topic_info, intent.topic, intent.question_type)
 
-    def _get_topic_info(self, topic: str) -> str: # get information about a topic 
-        # Try exact match in js_facts
+    def _get_topic_info(self, topic: str) -> str:
+        # Direct match
         if topic in self.js_facts:
             return self.js_facts[topic]
         
-        # Try to find related entries
+        # Check for related entries
         for key, value in self.js_facts.items():
-            if topic in key.lower() or key.lower() in topic:
+            if topic.lower() in key.lower() or key.lower() in topic.lower():
                 return value
         
-        # Try synonyms
+        # Check synonyms
         if topic in self.topic_synonyms:
             for synonym in self.topic_synonyms[topic]:
                 if synonym in self.js_facts:
                     return self.js_facts[synonym]
-                # Check if synonym is part of any key
                 for key, value in self.js_facts.items():
-                    if synonym in key.lower():
+                    if synonym.lower() in key.lower():
                         return value
         
-        return f"I don't have specific information about {topic}."
+        return f"I don't have specific information about {topic}. Can you ask about something else in JavaScript?"
 
     def _customize_response_by_type(self, base_info: str, topic: str, question_type: QuestionType) -> str:
         # Customise response based on question type
@@ -382,7 +571,7 @@ class Chatbot:
             return f"{base_info}\n\nWhat specifically did you want to compare it with?"
         
         elif question_type == QuestionType.TROUBLESHOOTING:
-            return f"{base_info}\n\nWhat specific problem are you having?"
+            return f"{base_info}\n\nWhat specific problem are you having? Can you share your code?"
         
         else:
             return f"{base_info}\n\nWhat else would you like to know about {topic}?"
@@ -393,36 +582,40 @@ class Chatbot:
         suggestions = self._get_topic_suggestions(user_input)
         
         if suggestions:
-            return f"I'm not sure about that. Are you asking about: {', '.join(suggestions)}?\n\nOr try asking something like:\n• 'What is a function?'\n• 'Show me an array example'\n• 'How do I use loops?'"
+            suggestions_text = ", ".join(suggestions)
+            return f"I'm not sure about that. Are you asking about: {suggestions_text}?\n\nOr try asking something like:\n• 'What is a function?'\n• 'Show me an array example'\n• 'How do I use loops?'"
         
-        return "I'm not sure about that. Can you ask something else about JavaScript?\n\nI can help with: variables, functions, arrays, objects, loops, conditionals, DOM, events, and more!"
+        return "I'm not quite sure what you're asking about. Can you ask me something about JavaScript?\n\nI can help with: variables, functions, arrays, objects, loops, conditionals, DOM, events, and more!"
 
-    def _get_topic_suggestions(self, user_input: str) -> List[str]:
-        # Suggest topics based on partial word matches
+    def _get_enhanced_topic_suggestions(self, user_input: str) -> List[str]:
+        # Suggest topics with fuzzy matching
         suggestions = []
         user_words = user_input.lower().split()
         
+        # Exact and partial matches
         for topic, synonyms in self.topic_synonyms.items():
             for word in user_words:
-                for synonym in synonyms:
-                    if len(word) >= 3 and (word in synonym or synonym in word):
-                        if topic not in suggestions:
-                            suggestions.append(topic)
-                        break
+                if len(word) >= 3:
+                    for synonym in synonyms:
+                        # Exact match
+                        if word == synonym or word in synonym or synonym in word:
+                            if topic not in suggestions:
+                                suggestions.append(topic)
+                            break
+                        # Fuzzy match for longer words
+                        elif len(word) >= 4 and len(synonym) >= 4:
+                            similarity = difflib.SequenceMatcher(None, word, synonym).ratio()
+                            if similarity >= 0.7:
+                                if topic not in suggestions:
+                                    suggestions.append(topic)
+                                break
         
         return suggestions[:3]
 
     def show_history(self):
+        # Show conversation history#
         return self.memory.get_history()
 
 
-if __name__ == "__main__":
-    bot = Chatbot()
-    print("LearnJS (type 'quit' to exit)")
-
-    while True:
-        user_text = input("You: ")
-        if user_text.lower() in ["quit", "exit", "bye"]:
-            print("Bot: Goodbye!")
-            break
-        print("Bot:", bot.get_response(user_text))
+# Alias for backward compatibility
+Chatbot = EnhancedChatbot

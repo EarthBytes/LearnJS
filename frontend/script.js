@@ -1,13 +1,22 @@
 async function sendQuery() {
-    const input = document.getElementById("userInput").value;
+    const inputEl = document.getElementById("userInput");
+    const input = inputEl.value.trim();
     const chatLog = document.getElementById("chatLog");
 
-    if (!input.trim()) return;
+    if (!input) return;
 
     // Add user message
     chatLog.innerHTML += `<p class="user">&gt; ${escapeHtml(input)}</p>`;
-    document.getElementById("userInput").value = "";
-    
+    inputEl.value = "";
+
+    // Check for "quit" command
+    if (input.toLowerCase() === "clear") {
+        chatLog.innerHTML = ""; 
+        inputEl.value = "";
+        inputEl.focus();
+        return; 
+    }
+
     // Add typing indicator
     const typingElement = document.createElement("p");
     typingElement.className = "bot typing";
@@ -46,6 +55,8 @@ async function sendQuery() {
         
         chatLog.scrollTop = chatLog.scrollHeight;
     }
+
+    inputEl.focus();
 }
 
 function escapeHtml(text) {
@@ -60,24 +71,15 @@ function formatBotResponse(response) {
     
     // Convert \n to <br> for line breaks
     formatted = formatted.replace(/\n/g, '<br>');
-    
-    // Convert bullet points (• followed by text) to proper HTML
-    formatted = formatted.replace(/•\s*([^<]*?)(?=<br>|$)/g, '<span class="bullet-point">• $1</span>');
-    
-    // Handle **bold** text (if any)
+    formatted = formatted.replace(/(?:^|<br>)•\s*(.*?)(?=<br>|$)/g, '<li>$1</li>');
+    formatted = formatted.replace(/(<li>.*?<\/li>)+/gs, '<ul>$&</ul>');
+    formatted = formatted.replace(/<br>\s*(?=<li|<ul)/g, '');
+    formatted = formatted.replace(/<\/li><br>/g, '</li>');
     formatted = formatted.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-    
-    // Handle code blocks (text within backticks)
+    formatted = formatted.replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
     formatted = formatted.replace(/`([^`]+)`/g, '<code>$1</code>');
-    
-    // Handle multiple line breaks (convert double <br> to paragraph breaks)
-    formatted = formatted.replace(/(<br>\s*){2,}/g, '</p><p class="bot">');
-    
-    // Wrap in paragraph if it doesn't already start with one
-    if (!formatted.startsWith('<p')) {
+    if (!/^<ul>/.test(formatted)) {
         formatted = '<p class="bot">' + formatted + '</p>';
-    } else if (!formatted.endsWith('</p>')) {
-        formatted = formatted + '</p>';
     }
     
     return formatted;

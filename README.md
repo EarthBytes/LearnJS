@@ -10,3 +10,5 @@ Future Plans
 - Code analysis: Paste in your JavaScript code and LearnJS will identify issues and explain why it’s wrong.
 - Error explanations: Receive human-like feedback on how to fix mistakes.
 - Interactive coding challenges: Test your knowledge directly in chat.
+
+See commands.txt for setting up the backend and frontend in VSCode (or another programming application).

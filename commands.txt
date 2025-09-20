@@ -17,3 +17,11 @@ Option 1: Open HTML directly via live server.
 
 Option 2: Run local web server
     python3 -m http.server 5500
+
+    if running locally on the same machine: 
+    http://localhost:5500 or http://127.0.0.1:5500
+
+    if running on another device on the same network:
+        you need your local IP 
+        suppose your IP is 192.168.1.10, the link would be:
+            http://192.168.1.10:5500

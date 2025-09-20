@@ -122,6 +122,7 @@ js_facts = {
     "throw": "throw creates custom errors. Example: if (age < 0) throw new Error('Age cannot be negative');",
 
     # ES6+ Features
+    "es6": "ES6 introduced many new features like arrow functions, template literals, destructuring... etc.",
     "template literal": "Template literals use backticks for string interpolation. Example: `Hello ${name}, you are ${age} years old`;",
     "destructuring": "Destructuring extracts values from arrays/objects. Example: const {name, age} = person; const [first, second] = array;",
     "spread operator": "Spread operator (...) expands arrays/objects. Example: const newArray = [...oldArray, newItem]; const newObj = {...oldObj, newProp: value};",
@@ -131,38 +132,189 @@ js_facts = {
     "json": "JSON is a data format for storing and exchanging data. Example: {\"name\": \"John\", \"age\": 30}",
     "json.parse": "JSON.parse() converts JSON string to JavaScript object. Example: const obj = JSON.parse('{\"name\": \"John\"}');",
     "json.stringify": "JSON.stringify() converts JavaScript object to JSON string. Example: const json = JSON.stringify({name: 'John'});",
+
+    # Misc
+    "misc": "JavaScript is a versatile language used for web development, server-side programming, game development, and more. Keep practicing to improve!",
+    "troubleshooting": "Common JS issues include syntax errors, undefined variables, and type errors. Use console.log and debugging tools to find problems.",
+    "debugging": "Common JS issues include syntax errors, undefined variables, and type errors. Use console.log and debugging tools to find problems.",
+    "best practices": "Use let/const instead of var, prefer === over ==, write modular code with functions, and comment your code for clarity.",
+    "resources": "Great JS learning resources include MDN Web Docs, freeCodeCamp, JavaScript.info, and various online courses on platforms like Codecademy and Udemy.",
 }
 
-# Common code issues and their explanations
-code_issues = {
-    "missing quotes": {
-        "patterns": [r"console\.log\([^'\"]*[a-zA-Z][^'\"]*\)", r"alert\([^'\"]*[a-zA-Z][^'\"]*\)"],
-        "explanation": "Strings must be enclosed in quotes. Use 'Hello' or \"Hello\" instead of Hello.",
-        "fix": "Wrap text in single or double quotes: console.log('Hello') or console.log(\"Hello\")"
-    },
-    "missing semicolon": {
-        "patterns": [r"console\.log\([^)]+\)(?!\s*;)", r"let\s+\w+\s*=\s*[^;]+(?!\s*;)"],
-        "explanation": "While not always required, semicolons are good practice to end statements.",
-        "fix": "Add a semicolon at the end of the statement: console.log('Hello');"
-    },
-    "wrong variable declaration": {
-        "patterns": [r"var\s+", r"\w+\s*=\s*[^;]+(?!let|const|var)"],
-        "explanation": "Use 'let' for variables that change or 'const' for constants instead of 'var'.",
-        "fix": "Use let or const: let name = 'John'; or const PI = 3.14;"
-    },
-    "assignment vs equality": {
-        "patterns": [r"if\s*\([^)]*=(?!=)[^)]*\)", r"while\s*\([^)]*=(?!=)[^)]*\)"],
-        "explanation": "Use == for comparison, not = (which is assignment). Better yet, use === for strict equality.",
-        "fix": "Use === for comparison: if (age === 18) instead of if (age = 18)"
-    },
-    "missing parentheses": {
-        "patterns": [r"console\.log[^(]", r"alert[^(]"],
-        "explanation": "Function calls require parentheses, even with no arguments.",
-        "fix": "Add parentheses: console.log('Hello') not console.log 'Hello'"
-    },
-    "wrong array access": {
-        "patterns": [r"\w+\.\d+", r"\w+\s*\(\s*\d+\s*\)"],
-        "explanation": "Access array elements with square brackets, not dots or parentheses.",
-        "fix": "Use square brackets: array[0] not array.0 or array(0)"
-    }
+# Conversational responses with priority levels
+# Priority 1 = Low 
+# Priority 2 = Medium 
+# Priority 3 = High 
+
+conversation_prompts = {
+    # Greetings (low priority)
+    "hello": {"response": "Hey!", "priority": 1},
+    "hi": {"response": "Hi!", "priority": 1}, 
+    "hey": {"response": "Hey there!", "priority": 1},
+    "good morning": {"response": "Morning!", "priority": 1},
+    "good afternoon": {"response": "Afternoon!", "priority": 1},
+    "good evening": {"response": "Evening!", "priority": 1},
+    "morning": {"response": "Morning!", "priority": 1},
+    "afternoon": {"response": "Afternoon!", "priority": 1},
+    "evening": {"response": "Evening!", "priority": 1},
+    "what's new": {"response": "Not much, just messing around with JS. You?", "priority": 1},
+    "cool": {"response": "Yeah, JS can be fun! Want to try something?", "priority": 1},
+    "sup": {"response": "Not much, just here to help with JS. You?", "priority": 1},
+    "yo": {"response": "Yo! Ready to learn some JS?", "priority": 1},
+    "greetings": {"response": "Greetings! How can I assist you with JavaScript today?", "priority": 1},
+
+    # How are you (low priority)
+    "how are you": {"response": "I'm good! How about you?", "priority": 1},
+    "how are you doing": {"response": "Doing fine, thanks! What are you working on?", "priority": 1},
+    "how's it going": {"response": "Pretty good! Ready to mess with some JS?", "priority": 1},
+    "what's up": {"response": "Not much, just here to help with JS. You?", "priority": 1},
+    
+    # Identity questions (medium priority)
+    "what are you": {"response": "I'm LearnJS - I help you learn Javascript. I can show you code examples and explain concepts.", "priority": 2},
+    "who are you": {"response": "Just LearnJS, here to help you learn JavaScript!", "priority": 2},
+    "what is this": {"response": "This is LearnJS, a chatbot to help you learn JavaScript.", "priority": 2},
+    "what is learnjs": {"response": "LearnJS is a small chatbot to explain JS topics and show examples.", "priority": 2},
+    "tell me about yourself": {"response": "I'm a JS helper here to answer questions and show examples. Nothing fancy!", "priority": 2},
+    "are you a bot": {"response": "Yep, just a simple JS helper bot.", "priority": 2},
+    "are you a robot": {"response": "Yep, just a simple JS helper bot.", "priority": 2},
+    "are you ai": {"response": "Yep, just a simple JS helper bot.", "priority": 2},
+    "are you artificial intelligence": {"response": "Yep, just a simple JS helper bot.", "priority": 2},
+    "do you have feelings": {"response": "Not really, just here to help with JS!", "priority": 2},
+    "do you have emotions": {"response": "Not really, just here to help with JS!", "priority": 2},
+    "what's your name": {"response": "I'm LearnJS, your JavaScript helper bot.", "priority": 2},
+    "what is your name": {"response": "I'm LearnJS, your JavaScript helper bot.", "priority": 2},
+    "who built you": {"response": "I was built by a developer called Cate who wanted to make learning JS easier.", "priority": 2},
+    "who created you": {"response": "I was built by a developer called Cate who wanted to make learning JS easier.", "priority": 2},
+    "who made you": {"response": "I was built by a developer called Cate who wanted to make learning JS easier.", "priority": 2},
+    "what are you made of": {"response": "My brain was created using Python, however my appearance was built with HTML, CSS and JS!.", "priority": 2},
+    "what are you built with": {"response": "My brain was created using Python, however my appearance was built with HTML, CSS and JS!", "priority": 2},
+    "what are you made from": {"response": "My brain was created using Python, however my appearance was built with HTML, CSS and JS!", "priority": 2},
+    "what technologies are you built with": {"response": "My brain was created using Python, however my appearance was built with HTML, CSS and JS!", "priority": 2},
+
+    
+    # Help/Usage (high priority)
+    "help": {"response": "You can just ask me about JS stuff. Like:\n• 'What is a function?'\n• 'Show me arrays'\n• 'How do I use loops?'\n• 'Explain variables'\nGo ahead, ask me anything JS!", "priority": 3},
+    "how do i use this": {"response": "Just ask about JavaScript! I can explain concepts or show examples. Try something like 'What are variables?' or 'How do functions work?'", "priority": 3},
+    "how do i use you": {"response": "Ask me about JavaScript stuff and I'll try to explain it. Variables, functions, arrays, loops—you name it.", "priority": 3},
+    "how do i use learnjs": {"response": "Just type any JS question and I'll help out. Something like 'What is an array?' works fine.", "priority": 3},
+    "how does this work": {"response": "Ask me any JS question and I'll try to explain. Could be basics like variables or advanced stuff.", "priority": 3},
+    "what can you do": {"response": "I can answer JS questions, explain concepts, and show examples. What do you want to try first?", "priority": 3},
+    "what can you help with": {"response": "I can help with anything in JS. Ask me about variables, functions, loops, arrays, or objects.", "priority": 3},
+    
+    # Gratitude (low priority)
+    "thank you": {"response": "No problem!", "priority": 1},
+    "thanks": {"response": "You're welcome!", "priority": 1},
+    "thx": {"response": "Anytime!", "priority": 1},
+    "appreciate it": {"response": "Glad to help!", "priority": 1},
+    "cheers": {"response": "Cheers!", "priority": 1},
+    "many thanks": {"response": "You're welcome!", "priority": 1},
+    "thanks a lot": {"response": "No problem!", "priority": 1},
+    "thank you very much": {"response": "Anytime!", "priority": 1},
+    "thank you so much": {"response": "Glad to help!", "priority": 1},
+    "i appreciate it": {"response": "You're welcome!", "priority": 1},
+    "much appreciated": {"response": "No problem!", "priority": 1},
+    "thanks a bunch": {"response": "Anytime!", "priority": 1},
+    "thanks so much": {"response": "Glad to help!", "priority": 1},
+    
+    # Farewell (medium priority)
+    "bye": {"response": "Bye! Catch you later.", "priority": 2},
+    "goodbye": {"response": "See you!", "priority": 2},
+    "see you": {"response": "See you soon!", "priority": 2},
+    "see you later": {"response": "See you later!", "priority": 2},
+    "catch you later": {"response": "Catch you later!", "priority": 2},
+    
+    # Encouragement/Motivation (medium priority)
+    "this is hard": {"response": "Yeah, JS can be tricky. Take it slow. Which part's giving you trouble?", "priority": 2},
+    "i'm confused": {"response": "No worries, it happens. What exactly is confusing?", "priority": 2},
+    "i don't understand": {"response": "That's okay, learning JS takes time. What part should I explain differently?", "priority": 2},
+    "this is frustrating": {"response": "I get it, programming can be frustrating. Want to try a different topic or take a break?", "priority": 2},
+}
+
+# Follow-up responses to "how are you" replies
+user_status_responses = {
+    "im good": {"response": "Glad to hear that!", "priority": 1},
+    "i'm good": {"response": "Glad to hear that!", "priority": 1},
+    "good": {"response": "Nice!", "priority": 1},
+    "fine": {"response": "Cool!", "priority": 1},
+    "not bad": {"response": "That's good to hear.", "priority": 1},
+    "okay": {"response": "Alright!", "priority": 1},
+    "doing well": {"response": "Great!", "priority": 1},
+    "doing fine": {"response": "Good to know!", "priority": 1},
+    "all good": {"response": "Awesome!", "priority": 1},
+    "so-so": {"response": "Hope your day gets better!", "priority": 1},
+    "not great": {"response": "Oh, hope things improve soon.", "priority": 1},
+}
+
+# Topic synonyms for keyword matching
+
+topic_synonyms = {
+    "function": ["function", "functions", "method", "methods", "func"],
+    "variable": ["variable", "variables", "var", "let", "const", "declaration"],
+    "array": ["array", "arrays", "list", "lists"],
+    "object": ["object", "objects", "obj", "dictionary"],
+    "loop": ["loop", "loops", "iteration", "iterate", "for", "while", "for loop", "while loop"],
+    "conditional": ["if", "else", "switch", "condition", "conditional", "if statement"],
+    "event": ["event", "events", "listener", "click", "submit"],
+    "string": ["string", "strings", "text"],
+    "number": ["number", "numbers", "numeric"],
+    "boolean": ["boolean", "booleans", "true", "false"],
+    "dom": ["dom", "document", "html", "element"],
+    "async": ["async", "await", "promise", "promises", "asynchronous"],
+    "json": ["json", "parse", "stringify"],
+    "console": ["console", "log", "debug", "debugging"],
+    "es6": ["es6", "ecmascript 6", "modern javascript", "es2015"],
+    "error handling": ["error", "errors", "try", "catch", "throw", "exception"],
+    "scope": ["scope", "scoping", "global", "local", "block scope", "function scope"],
+    "closure": ["closure", "closures", "lexical scope"],
+    "callback": ["callback", "callbacks", "higher-order function"],
+    "spread operator": ["spread", "spread operator"],
+    "rest parameter": ["rest", "rest parameter"],
+    "destructuring": ["destructure", "destructuring", "destructuring assignment"],
+    "template literal": ["template", "template literal", "template strings"],
+    "hoisting": ["hoisting", "hoist"],
+    "basics": ["basics", "basic", "introduction", "getting started", "syntax"],
+    "operators": ["operator", "operators", "arithmetic", "comparison", "logical", "assignment"],
+    "troubleshooting": ["error", "issue", "problem", "debug", "not working", "fix"],
+    "data types": ["data type", "data types", "type", "types"],
+}
+
+# Question type patterns
+
+question_patterns = {
+    "definition": [
+        r"what (is|are)",
+        r"define",
+        r"definition of",
+        r"meaning of",
+        r"explain",
+        r"tell me about"
+    ],
+    "example": [
+        r"example",
+        r"show me",
+        r"demonstrate",
+        r"sample",
+        r"can you show"
+    ],
+    "how_to": [
+        r"how (do|to)",
+        r"how can i",
+        r"steps to",
+        r"process of"
+    ],
+    "comparison": [
+        r"difference between",
+        r"compare",
+        r"vs",
+        r"versus",
+        r"better"
+    ],
+    "troubleshooting": [
+        r"error",
+        r"not working",
+        r"problem",
+        r"issue",
+        r"fix",
+        r"debug"
+    ]
 }

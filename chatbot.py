@@ -1,4 +1,4 @@
-from data import js_facts
+from data import ( js_facts, conversation_prompts, user_status_responses, topic_synonyms, question_patterns )
 from memory import Memory
 import re
 from typing import List, Dict, Tuple, Optional
@@ -26,75 +26,35 @@ class Chatbot:
     def __init__(self):
         self.memory = Memory(max_turns=5)
         
-        # Topic synonyms for keyword matching
-        self.topic_synonyms = {
-            "function": ["function", "functions", "method", "methods", "func"],
-            "variable": ["variable", "variables", "var", "let", "const", "declaration"],
-            "array": ["array", "arrays", "list", "lists"],
-            "object": ["object", "objects", "obj", "dictionary"],
-            "loop": ["loop", "loops", "iteration", "iterate", "for", "while", "for loop", "while loop"],
-            "conditional": ["if", "else", "switch", "condition", "conditional", "if statement"],
-            "event": ["event", "events", "listener", "click", "submit"],
-            "string": ["string", "strings", "text"],
-            "number": ["number", "numbers", "numeric"],
-            "boolean": ["boolean", "booleans", "true", "false"],
-            "dom": ["dom", "document", "html", "element"],
-            "async": ["async", "await", "promise", "promises", "asynchronous"],
-            "json": ["json", "parse", "stringify"],
-            "console": ["console", "log", "debug", "debugging"],
-        }
-        
-        # Question type patterns
-        self.question_patterns = {
-            QuestionType.DEFINITION: [
-                r"what (is|are)",
-                r"define",
-                r"definition of",
-                r"meaning of",
-                r"explain",
-                r"tell me about"
-            ],
-            QuestionType.EXAMPLE: [
-                r"example",
-                r"show me",
-                r"demonstrate",
-                r"sample",
-                r"can you show"
-            ],
-            QuestionType.HOW_TO: [
-                r"how (do|to)",
-                r"how can i",
-                r"steps to",
-                r"process of"
-            ],
-            QuestionType.COMPARISON: [
-                r"difference between",
-                r"compare",
-                r"vs",
-                r"versus",
-                r"better"
-            ],
-            QuestionType.TROUBLESHOOTING: [
-                r"error",
-                r"not working",
-                r"problem",
-                r"issue",
-                r"fix",
-                r"debug"
-            ]
-        }
+        # Import all data from data.py
+        self.js_facts = js_facts
+        self.conversation_prompts = conversation_prompts
+        self.topic_synonyms = topic_synonyms
+        self.question_patterns = question_patterns
 
     def get_response(self, user_input: str) -> str:
         original_input = user_input
         user_input = user_input.lower()
         self.memory.store_turn("user", user_input)
 
+        # Check for user status replies after bot asked "How are you?"
+
+        if self.memory.get_last_bot_turn():
+            last_bot_text = self.memory.get_last_bot_turn()["text"].lower()
+            
+            if any(phrase in last_bot_text for phrase in ["how are you", "how's it going", "how are you doing"]):
+                for status, data in self.user_status_responses.items():
+                    if status in user_input:
+                        response = data["response"]
+                        self.memory.store_turn("bot", response)
+                        return response
+                    
         # check for follow-up yes/no
         last_bot = self.memory.get_last_bot_turn()
         last_topic = self.memory.get_last_topic()
         if last_bot and last_topic and "Want me to explain more?" in last_bot["text"]:
             if user_input in ["yes", "y"]:
-                response = js_facts.get(last_topic, f"Sorry, I have no info on {last_topic}.")
+                response = self.js_facts.get(last_topic, f"Sorry, I have no info on {last_topic}.")
                 self.memory.store_turn("bot", response)
                 return response
             elif user_input in ["no", "n"]:
@@ -106,47 +66,17 @@ class Chatbot:
                 self.memory.store_turn("bot", response)
                 return response
 
-        # Enhanced intent extraction
-        intent = self.extract_intent(original_input)
+        # Check for multiple intents (conversational + learning)
+        conversational_matches = self._find_conversational_prompts(user_input)
+        learning_intent = self.extract_intent(original_input)
         
-        # If we have high confidence, use the enhanced response
-        if intent.confidence >= 0.4 and intent.topic:
-            response = self.generate_enhanced_response(intent)
-            self.memory.store_turn("bot", response, topic=intent.topic)
-            return response
-
-        # Use your original keyword matching for backward compatibility
-        matches = [(keyword, fact) for keyword, fact in js_facts.items() if keyword.lower() in user_input.lower()]
-        if matches:
-            keyword, fact = matches[0]
-            # Try to determine question type for this match
-            question_type = self._determine_question_type(original_input)
-            response = self._customize_response_by_type(fact, keyword, question_type)
-            self.memory.store_turn("bot", response, topic=keyword)
-            return response
-
-        # Fallback generic response
-        last_turns = [h for h in self.memory.get_history() if h["speaker"] == "user"]
-        last_meaningful = None
-        last_matched_keyword = None  # track the keyword that was matched
+        # Handle multiple intents with priority
+        response = self._handle_multiple_intents(conversational_matches, learning_intent, original_input)
         
-        for turn in reversed(last_turns[:-1]):  # skip the last turn
-            text = turn["text"].lower()
-            if text not in CONFUSED_INPUTS and text not in ["yes", "no", "y", "n"]:
-                last_meaningful = turn["text"]
-                # find which keyword was matched in that turn
-                for keyword in js_facts.keys():
-                    if keyword.lower() in text:
-                        last_matched_keyword = keyword
-                        break
-                break
-
-        if last_meaningful and last_matched_keyword:
-            response = f"I'm not sure about that. Earlier you asked me about '{last_meaningful}'. Want me to explain more?"
-            # store the matched keyword, not the full question
-            self.memory.store_turn("bot", response, topic=last_matched_keyword)
+        # Store response with appropriate topic
+        if learning_intent.topic and learning_intent.confidence >= 0.4:
+            self.memory.store_turn("bot", response, topic=learning_intent.topic)
         else:
-            response = self._handle_no_matches(original_input)
             self.memory.store_turn("bot", response)
 
         return response
@@ -155,43 +85,193 @@ class Chatbot:
         # Extract topic and question type from user input
         user_input_lower = user_input.lower()
         
-        # Find matching topics using synonyms
-        found_topics = []
-        found_keywords = []
+        # Find matching topics and their positions
+        topic_matches = []
         
         # Check synonyms first
         for topic, synonyms in self.topic_synonyms.items():
             for synonym in synonyms:
                 if synonym in user_input_lower:
-                    found_topics.append(topic)
-                    found_keywords.append(synonym)
-                    break
+                    position = user_input_lower.find(synonym)
+                    topic_matches.append({
+                        'topic': topic,
+                        'keyword': synonym,
+                        'position': position,
+                        'length': len(synonym)
+                    })
         
         # Also check your original js_facts keys
-        for keyword in js_facts.keys():
+        for keyword in self.js_facts.keys():
             if keyword.lower() in user_input_lower:
-                if keyword not in found_keywords:
-                    found_keywords.append(keyword)
-                # Try to map to a topic
+                position = user_input_lower.find(keyword.lower())
                 mapped_topic = self._map_keyword_to_topic(keyword)
-                if mapped_topic and mapped_topic not in found_topics:
-                    found_topics.append(mapped_topic)
+                topic_matches.append({
+                    'topic': mapped_topic or keyword,
+                    'keyword': keyword,
+                    'position': position,
+                    'length': len(keyword)
+                })
+        
+        # Remove duplicates and sort by position
+        seen_topics = set()
+        unique_matches = []
+        for match in sorted(topic_matches, key=lambda x: x['position']):
+            if match['topic'] not in seen_topics:
+                unique_matches.append(match)
+                seen_topics.add(match['topic'])
         
         # Determine question type
         question_type = self._determine_question_type(user_input)
         
-        # Resolve primary topic if multiple found
-        primary_topic = self._resolve_primary_topic(found_topics, user_input_lower)
+        # If multiple topics, create combined response intent
+        if len(unique_matches) > 1:
+            # Create a multi-topic intent
+            topics = [match['topic'] for match in unique_matches]
+            keywords = [match['keyword'] for match in unique_matches]
+            primary_topic = f"multiple:{','.join(topics)}"  # Special indicator for multiple topics
+            confidence = 0.8  # High confidence since we found multiple clear topics
+            
+            return Intent(
+                topic=primary_topic,
+                question_type=question_type,
+                confidence=confidence,
+                keywords_found=keywords
+            )
         
-        # Calculate confidence
-        confidence = self._calculate_confidence(found_keywords, question_type, user_input)
+        # Single topic handling (existing logic)
+        elif len(unique_matches) == 1:
+            match = unique_matches[0]
+            confidence = self._calculate_confidence([match['keyword']], question_type, user_input)
+            
+            return Intent(
+                topic=match['topic'],
+                question_type=question_type,
+                confidence=confidence,
+                keywords_found=[match['keyword']]
+            )
         
-        return Intent(
-            topic=primary_topic,
-            question_type=question_type,
-            confidence=confidence,
-            keywords_found=found_keywords
-        )
+        # No topics found
+        else:
+            confidence = self._calculate_confidence([], question_type, user_input)
+            return Intent(
+                topic=None,
+                question_type=question_type,
+                confidence=confidence,
+                keywords_found=[]
+            )
+
+    def _find_conversational_prompts(self, user_input: str) -> List[Dict]:
+        # Find conversational prompts in user input
+        matches = []
+        user_input_lower = user_input.lower()
+        
+        for prompt, data in self.conversation_prompts.items():
+            if prompt in user_input_lower:
+                position = user_input_lower.find(prompt)
+                matches.append({
+                    'prompt': prompt,
+                    'response': data['response'],
+                    'priority': data['priority'],
+                    'position': position
+                })
+        
+        # Sort by priority (higher first), then by position (earlier first)
+        return sorted(matches, key=lambda x: (-x['priority'], x['position']))
+
+    def _handle_multiple_intents(self, conversational_matches: List[Dict], learning_intent: Intent, original_input: str) -> str:
+        # Determine if we have both conversational and learning intents
+        
+        has_conversation = len(conversational_matches) > 0
+        has_learning = learning_intent.confidence >= 0.4 and learning_intent.topic
+        
+        # Case 1 - Both conversational and learning 
+        if has_conversation and has_learning:
+            # Get the highest priority conversational response
+            conv_response = conversational_matches[0]['response']
+            
+            # Handle multiple topics in learning
+            if learning_intent.topic and learning_intent.topic.startswith("multiple:"):
+                learning_response = self._handle_multiple_topics(learning_intent)
+            else:
+                learning_response = self.generate_enhanced_response(learning_intent)
+            
+            # Combine responses based on priority
+            if conversational_matches[0]['priority'] >= 3:  # High priority conversation
+                return f"{conv_response}\n\n{learning_response}"
+            else:  # Low/medium priority
+                return f"{conv_response} {learning_response}"
+        
+        # Case 2 - Only conversational
+        elif has_conversation and not has_learning:
+            return conversational_matches[0]['response']
+        
+        # Case 3 - Only learning (multiple topics)
+        elif has_learning and learning_intent.topic and learning_intent.topic.startswith("multiple:"):
+            return self._handle_multiple_topics(learning_intent)
+        
+        # Case 4 - Only learning (single topic)
+        elif has_learning:
+            return self.generate_enhanced_response(learning_intent)
+        
+        # Case 5 - Fallback to original logic
+        else:
+            return self._handle_fallback_logic(original_input)
+
+    def _handle_multiple_topics(self, intent: Intent) -> str:
+        # Handle multiple topics in a single intent
+        topics_str = intent.topic.replace("multiple:", "")
+        topics = topics_str.split(",")
+        
+        if len(topics) == 2:
+            # Handle two topics
+            topic1, topic2 = topics
+            info1 = self._get_topic_info(topic1)
+            info2 = self._get_topic_info(topic2)
+            
+            if intent.question_type == QuestionType.COMPARISON:
+                return f"{topic1.title()} vs {topic2.title()}:\n\n{topic1.title()}:{info1}\n\n{topic2.title()}: {info2}\n\nWhich one would you like me to explain further?"
+            else:
+                return f"I can see you're asking about {topic1} and {topic2}!\n\n {info1}\n\n {info2}\n\nWhich topic interests you more?"
+        
+        elif len(topics) > 2:
+            # Handle many topics
+            topic_list = ", ".join([t.title() for t in topics[:-1]]) + f", and {topics[-1].title()}"
+            return f"Wow, you're asking about {topic_list}! That's a lot to cover.\n\nWhich one would you like me to start with? Or would you prefer a brief overview of all of them?"
+        
+        else:
+            # Shouldn't happen, but fallback
+            return self._get_topic_info(topics[0])
+
+    def _handle_fallback_logic(self, original_input: str) -> str:
+        # Lowercase for matching but keep original for responses
+        user_input = original_input.lower()
+        
+        # Check original keyword matching as fallback
+        matches = [(keyword, fact) for keyword, fact in self.js_facts.items() if keyword.lower() in user_input]
+        if matches:
+            keyword, fact = matches[0]
+            question_type = self._determine_question_type(original_input)
+            return self._customize_response_by_type(fact, keyword, question_type)
+
+        # Memory-based fallback
+        last_turns = [h for h in self.memory.get_history() if h["speaker"] == "user"]
+        last_meaningful = None
+        last_matched_keyword = None
+        
+        for turn in reversed(last_turns[:-1]):
+            text = turn["text"].lower()
+            if text not in CONFUSED_INPUTS and text not in ["yes", "no", "y", "n"]:
+                last_meaningful = turn["text"]
+                for keyword in self.js_facts.keys():
+                    if keyword.lower() in text:
+                        last_matched_keyword = keyword
+                        break
+                break
+
+        if last_meaningful and last_matched_keyword:
+            return f"I'm not sure about that. Earlier you asked me about '{last_meaningful}'. Want me to explain more?"
+        else:
+            return self._handle_no_matches(original_input)
 
     def _map_keyword_to_topic(self, keyword: str) -> Optional[str]:
         # Map js_facts keyword to topic category
@@ -221,36 +301,22 @@ class Chatbot:
         # determine what type of question is being asked
         user_input_lower = user_input.lower()
         
-        for q_type, patterns in self.question_patterns.items():
+        for q_type_str, patterns in self.question_patterns.items():
             for pattern in patterns:
                 if re.search(pattern, user_input_lower):
-                    return q_type
+                    # Map string to enum
+                    if q_type_str == "definition":
+                        return QuestionType.DEFINITION
+                    elif q_type_str == "example":
+                        return QuestionType.EXAMPLE
+                    elif q_type_str == "how_to":
+                        return QuestionType.HOW_TO
+                    elif q_type_str == "comparison":
+                        return QuestionType.COMPARISON
+                    elif q_type_str == "troubleshooting":
+                        return QuestionType.TROUBLESHOOTING
         
         return QuestionType.GENERAL
-
-    def _resolve_primary_topic(self, topics: List[str], user_input: str) -> Optional[str]:
-        # Choose the most relevant topic when multiple are found
-        if not topics:
-            return None
-        if len(topics) == 1:
-            return topics[0]
-        
-        # Use memory context if available
-        last_topic = self.memory.get_last_topic()
-        if last_topic and last_topic in topics:
-            return last_topic
-        
-        # Score by position in sentence
-        topic_scores = {}
-        for topic in topics:
-            score = 0
-            for synonym in self.topic_synonyms.get(topic, [topic]):
-                if synonym in user_input:
-                    position = user_input.find(synonym)
-                    score += (len(user_input) - position) / len(user_input)
-            topic_scores[topic] = score
-        
-        return max(topic_scores, key=topic_scores.get) if topic_scores else topics[0]
 
     def _calculate_confidence(self, keywords: List[str], question_type: QuestionType, user_input: str) -> float:
         # Calculate confidence on intent
@@ -281,21 +347,21 @@ class Chatbot:
 
     def _get_topic_info(self, topic: str) -> str: # get information about a topic 
         # Try exact match in js_facts
-        if topic in js_facts:
-            return js_facts[topic]
+        if topic in self.js_facts:
+            return self.js_facts[topic]
         
         # Try to find related entries
-        for key, value in js_facts.items():
+        for key, value in self.js_facts.items():
             if topic in key.lower() or key.lower() in topic:
                 return value
         
         # Try synonyms
         if topic in self.topic_synonyms:
             for synonym in self.topic_synonyms[topic]:
-                if synonym in js_facts:
-                    return js_facts[synonym]
+                if synonym in self.js_facts:
+                    return self.js_facts[synonym]
                 # Check if synonym is part of any key
-                for key, value in js_facts.items():
+                for key, value in self.js_facts.items():
                     if synonym in key.lower():
                         return value
         
@@ -307,21 +373,22 @@ class Chatbot:
             return f"{base_info}\n\nWould you like to see an example?"
         
         elif question_type == QuestionType.EXAMPLE:
-            return f"Here's about {topic}:\n\n{base_info}\n\nNeed help with a specific use case?"
+            return f"{base_info}\n\nNeed help with a specific use case?"
         
         elif question_type == QuestionType.HOW_TO:
-            return f"Here's how to work with {topic}:\n\n{base_info}\n\nWant me to explain any part in more detail?"
+            return f"{base_info}\n\nWant me to explain any part in more detail?"
         
         elif question_type == QuestionType.COMPARISON:
-            return f"About {topic}:\n\n{base_info}\n\nWhat specifically did you want to compare it with?"
+            return f"{base_info}\n\nWhat specifically did you want to compare it with?"
         
         elif question_type == QuestionType.TROUBLESHOOTING:
-            return f"Here's info about {topic}:\n\n{base_info}\n\nWhat specific problem are you having?"
+            return f"{base_info}\n\nWhat specific problem are you having?"
         
         else:
             return f"{base_info}\n\nWhat else would you like to know about {topic}?"
 
     def _handle_no_matches(self, user_input: str) -> str:
+        # Handle no matches found
         # Try to suggest topics based on partial matches
         suggestions = self._get_topic_suggestions(user_input)
         

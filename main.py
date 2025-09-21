@@ -1,25 +1,3 @@
-from chatbot import Chatbot
-
-def main():
-    print("Welcome to the LearnJS!")
-    print("Ask me about Javascript")
-
-bot = Chatbot()
-
-while True:
-    user_input = input("\nYou: ")
-    if user_input.lower() in ['exit', 'quit']:
-        print("LearnJS: Goodbye!")
-        break
-    response = bot.get_response(user_input)
-    print(f"Bot: {response}")
-
-if __name__ == "__main__":
-    main()
-
-    """
-Main entry point for the JavaScript Learning Assistant
-"""
 import uvicorn
 import os
 from fastapi import FastAPI
@@ -35,7 +13,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 def main():
-    """Main function to run the application"""
     try:
         # Get configuration from environment variables
         host = os.getenv("HOST", "0.0.0.0")

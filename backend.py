@@ -1,10 +1,10 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
-from chatbot import Chatbot
+from chatbot import LearnJSBot
 
 app = FastAPI()
-bot = Chatbot()
+bot = LearnJSBot()
 
 # Allow frontend to talk to backend
 app.add_middleware(

@@ -7,8 +7,9 @@ from enum import Enum
 from collections import defaultdict
 import difflib
 from examples import get_example
+from sentence_transformers import SentenceTransformer, util
 
-CONFUSED_INPUTS = {"huh?", "what?", "?", "idk", "i don't understand", "explain", "can you repeat?", "confused"}
+CONFUSED_INPUTS = {"huh?", "what?", "?", "idk", "i don't understand", "explain", "can you repeat?"}
 NONSENSE_THRESHOLD = 0.3  # Minimum ratio of meaningful words to total words
 
 class QuestionType(Enum):
@@ -42,8 +43,10 @@ class LearnJSBot:
         self.status_responses = user_status_responses
         self.synonyms = topic_synonyms
         self.patterns = question_patterns
-        
-        
+        self.model = SentenceTransformer('all-MiniLM-L6-v2')
+        # Precompute embeddings for JS facts
+        self.fact_embeddings = {k: self.model.encode(v) for k, v in self.js_facts.items()}
+
     def get_response(self, user_input: str) -> str:
         # Main entry point for processing user input
         original = user_input
@@ -109,11 +112,11 @@ class LearnJSBot:
             
         # Common English words
         common_words = {
-            'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 
-            'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'have', 'has', 'had',
-            'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'can',
-            'what', 'how', 'when', 'where', 'why', 'who', 'which', 'this', 'that', 'these',
-            'those', 'i', 'you', 'he', 'she', 'it', 'we', 'they', 'me', 'him', 'her', 'us', 'them'
+            'the','a','an','and','or','but','in','on','at','to','for','of','with','by',
+            'is','are','was','were','be','been','have','has','had','do','does','did',
+            'will','would','could','should','may','might','can','what','how','when','where','why',
+            'who','which','this','that','these','those','i','you','he','she','it','we','they',
+            'me','him','her','us','them'
         }
         return word in common_words
     
@@ -152,23 +155,7 @@ class LearnJSBot:
         user_input = user_input.strip()
         
         if user_input in ["yes", "y"]:
-            # Map topic to examples.py format if needed
-            topic_mapping = {
-                "variable": "variable",
-                "variables": "variable", 
-                "function": "function",
-                "functions": "function",
-                "array": "array",
-                "arrays": "array",
-                "object": "object",
-                "objects": "object",
-                "loop": "loop",
-                "loops": "loop"
-            }
-            
-            mapped_topic = topic_mapping.get(last_topic.lower(), last_topic.lower())
-            example = get_example(mapped_topic)
-            
+            example = get_example(last_topic)
             return self._store_and_return(example, last_topic)
         elif user_input in ["no", "n"]:
             return self._store_and_return("No problem! Ask me about another JavaScript topic.")
@@ -315,9 +302,8 @@ class LearnJSBot:
                 
                 # Add brief greeting if present
                 if has_conversation and conv_matches[0].priority == 1:
-                    greeting = conv_matches[0].response.split('!')[0] + "!"
-                    response = f"{greeting} {response}"
-                
+                    greeting = conv_matches[0].response.split('!')[0] + '!'
+                    response = greeting + " " + response
                 return response, intent.topic
         
         # Only handle pure conversational intents if no learning detected
@@ -325,139 +311,43 @@ class LearnJSBot:
             return conv_matches[0].response, None
         
         # Fallback
-        return self._handle_fallback(original_input), None
-    
+        return "I'm not sure I understand. Try asking about JavaScript concepts like variables, functions, or arrays!", None
+
     def _handle_multiple_topics(self, intent: Intent) -> str:
-        # Handle multiple topics in a single intent
-        topics = intent.topic.replace("multiple:", "").split(",")
-        
-        if len(topics) == 2:
-            topic1, topic2 = topics
-            info1 = self._get_topic_info(topic1)
-            info2 = self._get_topic_info(topic2)
-            
-            if intent.question_type == QuestionType.COMPARISON:
-                return f"**{topic1.title()}:** {info1}\n\n**{topic2.title()}:** {info2}\n\nWhat specific aspects would you like me to compare?"
-            else:
-                return f"**{topic1.title()}:** {info1}\n\n**{topic2.title()}:** {info2}\n\nWould you like me to go deeper into either topic?"
-        
-        if len(topics) > 2:
-            topic_list = ", ".join([t.title() for t in topics[:-1]]) + f", and {topics[-1].title()}"
-            return f"You're asking about {topic_list}! That's quite a bit to cover.\n\nWhich topic would you like me to start with?"
-        
-        return self._get_topic_info(topics[0])
-    
+        topics = intent.topic.replace("multiple:", "").split(',')
+        return f"I think you are asking about multiple topics: {', '.join(topics)}. Could you clarify which one you want first?"
+
     def _generate_learning_response(self, intent: Intent) -> str:
-        base_info = self._get_topic_info(intent.topic)
-        
-        # Customise by question type
+        if intent.question_type == QuestionType.EXAMPLE:
+            # Directly return the example
+            example = get_example(intent.topic)
+            return example
+
+        base_info = self.js_facts.get(intent.topic, f"I don't have information on {intent.topic} yet.")
+
         type_responses = {
             QuestionType.DEFINITION: f"{base_info}\n\nWould you like to see an example?",
-            QuestionType.EXAMPLE: f"{base_info}\n\nNeed help with a specific use case?",
             QuestionType.HOW_TO: f"{base_info}\n\nWant me to explain any part in more detail?",
             QuestionType.COMPARISON: f"{base_info}\n\nWhat specifically did you want to compare it with?",
             QuestionType.TROUBLESHOOTING: f"{base_info}\n\nWhat specific problem are you having? Can you share your code?"
         }
-        
-        return type_responses.get(
-            intent.question_type, 
-            f"{base_info}\n\nWhat else would you like to know about {intent.topic}?"
-        )
-    
-    def _get_topic_info(self, topic: str) -> str:
-        # Direct match
-        if topic in self.js_facts:
-            return self.js_facts[topic]
-        
-        # Check for related entries
-        for key, value in self.js_facts.items():
-            if topic.lower() in key.lower() or key.lower() in topic.lower():
-                return value
-        
-        # Check synonyms
-        if topic in self.synonyms:
-            for synonym in self.synonyms[topic]:
-                if synonym in self.js_facts:
-                    return self.js_facts[synonym]
-                for key, value in self.js_facts.items():
-                    if synonym.lower() in key.lower():
-                        return value
-        
-        return f"I don't have specific information about {topic}. Can you ask about something else in JavaScript?"
-    
-    def _handle_fallback(self, original_input: str) -> str:
-        # Handles cases where no clear intent is found
-        user_input = original_input.lower()
-        
-        # Try fuzzy matching
-        matches = []
-        for keyword, fact in self.js_facts.items():
-            if keyword.lower() in user_input:
-                matches.append((keyword, fact))
-        
-        # Fuzzy matching for typos
-        if not matches:
-            for word in user_input.split():
-                if len(word) >= 4:
-                    for keyword in self.js_facts.keys():
-                        if len(keyword) >= 4 and difflib.SequenceMatcher(None, word, keyword.lower()).ratio() >= 0.75:
-                            matches.append((keyword, self.js_facts[keyword]))
-                            break
-        
-        if matches:
-            return matches[0][1] + "\n\nWould you like to see an example?"
-        # Try to suggest topics based on partial matches
-        suggestions = self._get_topic_suggestions(user_input)
-        if suggestions:
-            return f"I'm not sure about that. Are you asking about: {', '.join(suggestions)}?\n\nTry: 'What is a function?' or 'Show me array examples'"
-        
-        return "I'm not quite sure what you're asking about. Can you ask me something about JavaScript?\n\nI can help with: variables, functions, arrays, objects, loops, conditionals, DOM, events, and more!"
-    
-    def _get_topic_suggestions(self, text: str) -> List[str]:
-        # Suggest topics with fuzzy matching
-        suggestions = []
-        words = text.lower().split()
-        
-        # Exact and partial matches
-        for topic, synonyms in self.synonyms.items():
-            for word in words:
-                if len(word) >= 3:
-                    for synonym in synonyms:
-                        if (word == synonym or word in synonym or synonym in word or
-                            (len(word) >= 4 and len(synonym) >= 4 and 
-                             difflib.SequenceMatcher(None, word, synonym).ratio() >= 0.7)):
-                            if topic not in suggestions:
-                                suggestions.append(topic)
-                            break
-        
-        return suggestions[:3]
-    
-    def _map_keyword_to_topic(self, keyword: str) -> Optional[str]:
-        """Map js_facts keyword to topic category"""
-        keyword_lower = keyword.lower()
-        
-        mappings = {
-            "var": "variable", "let": "variable", "const": "variable",
-            "for loop": "loop", "while loop": "loop", "for": "loop", "while": "loop",
-            "if statement": "conditional", "if": "conditional", "else": "conditional",
-            "arrays": "array", "objects": "object", "functions": "function",
-            "strings": "string", "numbers": "number", "booleans": "boolean",
-            "what is javascript": "javascript", "javascript basics": "basics"
-        }
-        
-        if keyword_lower in mappings:
-            return mappings[keyword_lower]
-        
-        for topic in self.synonyms.keys():
-            if topic in keyword_lower or keyword_lower in topic:
-                return topic
-        
-        return keyword_lower
-    
-    def show_history(self):
-        # Show conversation history#
-        return self.memory.get_history()
 
-# Backward compatibility
-Chatbot = LearnJSBot
-EnhancedChatbot = LearnJSBot
+        return type_responses.get(intent.question_type, f"{base_info}\n\nWhat else would you like to know about {intent.topic}?")
+
+    def _map_keyword_to_topic(self, keyword: str) -> Optional[str]:
+        for topic, synonyms in self.synonyms.items():
+            if keyword in synonyms:
+                return topic
+        return None
+
+    # Semantic search for paraphrased inputs
+    def semantic_search_topic(self, user_input: str) -> Optional[str]:
+        user_emb = self.model.encode(user_input)
+        best_topic = None
+        best_score = 0.0
+        for topic, emb in self.fact_embeddings.items():
+            sim = util.cos_sim(user_emb, emb)
+            if sim > best_score and sim > 0.6:
+                best_score = sim
+                best_topic = topic
+        return best_topic
